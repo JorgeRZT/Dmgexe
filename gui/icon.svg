@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#5a5cf0"/>
+      <stop offset="1" stop-color="#171a5c"/>
+    </linearGradient>
+    <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffbe55"/>
+      <stop offset="1" stop-color="#ff4f7b"/>
+    </linearGradient>
+  </defs>
+
+  <!-- macOS-style rounded square -->
+  <rect x="0" y="0" width="1024" height="1024" rx="230" fill="url(#bg)"/>
+
+  <!-- Windows-style program window (the .exe) -->
+  <rect x="120" y="150" width="480" height="410" rx="48" fill="#ffffff" fill-opacity="0.96"/>
+  <path d="M120 198a48 48 0 0 1 48-48h384a48 48 0 0 1 48 48v50H120z" fill="#d9dbff"/>
+  <circle cx="178" cy="199" r="15" fill="#ff6b6b"/>
+  <circle cx="226" cy="199" r="15" fill="#ffd166"/>
+  <circle cx="274" cy="199" r="15" fill="#4cd68a"/>
+  <rect x="168" y="292" width="300" height="26" rx="13" fill="#b9bcff"/>
+  <rect x="168" y="350" width="380" height="26" rx="13" fill="#d3d5ff"/>
+  <rect x="168" y="408" width="240" height="26" rx="13" fill="#b9bcff"/>
+  <rect x="168" y="466" width="330" height="26" rx="13" fill="#d3d5ff"/>
+
+  <!-- Native app tile (the .app) -->
+  <rect x="478" y="548" width="404" height="404" rx="100" fill="#000000" fill-opacity="0.28" transform="translate(0 16)"/>
+  <rect x="478" y="548" width="404" height="404" rx="100" fill="url(#tile)"/>
+  <path d="M630 650v200l170-100z" fill="#ffffff"/>
+
+  <!-- Conversion arrow -->
+  <path d="M250 600C250 730 330 790 420 770" fill="none" stroke="#ffffff" stroke-width="30" stroke-linecap="round"/>
+  <path d="M410 716l78 56-86 50z" fill="#ffffff" stroke="#ffffff" stroke-width="12" stroke-linejoin="round"/>
+</svg>

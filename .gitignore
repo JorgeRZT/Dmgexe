@@ -1,0 +1,6 @@
+.DS_Store
+# Build output and local test material
+*.app/
+dist/
+*.zip
+*.profile
