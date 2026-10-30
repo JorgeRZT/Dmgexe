@@ -88,7 +88,9 @@ The app is ad-hoc signed only. If macOS blocks it, right-click it and choose
 | `--winetricks "verbs"` | Install winetricks verbs on first launch (needs `winetricks` installed). |
 | `--no-d3dcompiler` | Skip the native `d3dcompiler_47` (see below). |
 | `--retina` | Enable Retina mode (sharper, slower). |
-| `--no-msync` | Disable MSYNC/ESYNC. |
+| `--no-msync` | Disable MSYNC. |
+| `--no-esync` | Disable ESYNC. |
+| `--no-vsync` | Disable VSync (DXVK backend only). |
 | `--win32` | 32-bit prefix (old runtimes only). |
 | `--profile FILE` / `--save-profile FILE` | Load / save settings (see below). |
 
@@ -159,6 +161,21 @@ program** tab streams the same output).
   rendering.
 - **`Failed to compile shader ... syntax error`**: make sure the native
   `d3dcompiler_47` is installed (the default; do not pass `--no-d3dcompiler`).
+- **`Required Vulkan extension VK_KHR_surface not supported` / `Failed to create
+  DXGI Factory`** with `--gfx dxvk`: the `gptk` runtime has no Vulkan support, so
+  DXVK cannot work with it. Use `--fetch-wine devel` (or `stable` / `staging`),
+  which bundle MoltenVK. If MoltenVK is not found, install it with
+  `brew install molten-vk` (the GUI offers an **Install MoltenVK** button).
+- **`VK_QUERY_TYPE_PIPELINE_STATISTICS is not supported`** (crash) with
+  `--gfx dxvk`: MoltenVK does not implement pipeline-statistics queries and the
+  bundled DXVK build requires them for some programs. Use `--gfx d3dmetal`.
+- **Black screen in one level or scene** while the menu, sound and input work:
+  usually a rendering feature the graphics backend does not support. Try lowering
+  the program's graphics options (for example light occlusion), or another
+  `--gfx` backend.
+- **Slow loading with a program on an external drive**: with `--link` every file
+  is read from the original folder. Copy the program to the internal disk or
+  generate the app without `--link`.
 - **Choosing a runtime**: `gptk` is the best option for Direct3D 11/12; a recent
   `devel` runtime is better for everything else.
 
@@ -170,7 +187,10 @@ program** tab streams the same output).
 - Kernel-level anti-cheat generally does not work.
 - Some DRM and launchers cause trouble.
 - `--gfx opengl` is software rendering and is slow by nature; `--gfx dxvk` uses
-  an old build and is less tested than the other paths.
+  an old build (1.10.3), needs a non-`gptk` runtime, and fails on programs that
+  require pipeline-statistics queries, which MoltenVK does not support.
+- `--no-vsync` only takes effect with `--gfx dxvk`; with D3DMetal use the
+  program's own settings.
 - A native macOS build of a program, when it exists, will almost always perform
   better than any compatibility layer.
 - Apps with an embedded runtime are not signed; if macOS blocks one, run

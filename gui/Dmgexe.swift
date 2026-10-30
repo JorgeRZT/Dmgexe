@@ -9,14 +9,35 @@ struct SavedProgram: Codable, Identifiable, Equatable {
     var id = UUID()
     var exe = "", dir = "", name = "", outDir = ""
     var wine = "gptk", customWine = "", gfx = "auto"
-    var copyProgram = true, retina = false, msync = true
+    var copyProgram = true, retina = false, msync = true, esync = true, vsync = true
     var args = "", envs = "", winetricks = ""
 
     // "copyGame" is the key used by earlier versions of the library file
     enum CodingKeys: String, CodingKey {
         case id, exe, dir, name, outDir, wine, customWine, gfx
         case copyProgram = "copyGame"
-        case retina, msync, args, envs, winetricks
+        case retina, msync, esync, vsync, args, envs, winetricks
+    }
+
+    init(id: UUID = UUID(), exe: String = "", dir: String = "", name: String = "", outDir: String = "",
+         wine: String = "gptk", customWine: String = "", gfx: String = "auto",
+         copyProgram: Bool = true, retina: Bool = false, msync: Bool = true, esync: Bool = true, vsync: Bool = true,
+         args: String = "", envs: String = "", winetricks: String = "") {
+        self.id = id; self.exe = exe; self.dir = dir; self.name = name; self.outDir = outDir
+        self.wine = wine; self.customWine = customWine; self.gfx = gfx
+        self.copyProgram = copyProgram; self.retina = retina; self.msync = msync; self.esync = esync; self.vsync = vsync
+        self.args = args; self.envs = envs; self.winetricks = winetricks
+    }
+
+    // esync and vsync are missing from library files saved by earlier versions
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        func get<T: Decodable>(_ k: CodingKeys, _ d: T) -> T { (try? c.decodeIfPresent(T.self, forKey: k)) ?? d }
+        self.init(id: get(.id, UUID()), exe: get(.exe, ""), dir: get(.dir, ""), name: get(.name, ""), outDir: get(.outDir, ""),
+                  wine: get(.wine, "gptk"), customWine: get(.customWine, ""), gfx: get(.gfx, "auto"),
+                  copyProgram: get(.copyProgram, true), retina: get(.retina, false), msync: get(.msync, true),
+                  esync: get(.esync, true), vsync: get(.vsync, true),
+                  args: get(.args, ""), envs: get(.envs, ""), winetricks: get(.winetricks, ""))
     }
 
     var title: String {
@@ -36,12 +57,15 @@ final class Generator: ObservableObject {
     @Published var copyProgram = true
     @Published var retina = false
     @Published var msync = true
+    @Published var esync = true
+    @Published var vsync = true
     @Published var args = ""
     @Published var envs = ""
     @Published var winetricks = ""
 
     @Published var log = ""
     @Published var running = false
+    @Published var hasMoltenVK = true
     @Published var resultApp: String?
     private var proc: Process?
 
@@ -79,7 +103,7 @@ final class Generator: ObservableObject {
     private func snapshot(id: UUID) -> SavedProgram {
         SavedProgram(id: id, exe: exe, dir: dir, name: name, outDir: outDir,
                   wine: wineChoice.key, customWine: customWine, gfx: gfx.flag,
-                  copyProgram: copyProgram, retina: retina, msync: msync,
+                  copyProgram: copyProgram, retina: retina, msync: msync, esync: esync, vsync: vsync,
                   args: args, envs: envs, winetricks: winetricks)
     }
 
@@ -95,7 +119,7 @@ final class Generator: ObservableObject {
         exe = g.exe; dir = g.dir; name = g.name
         if !g.outDir.isEmpty { outDir = g.outDir }
         wineChoice = .from(key: g.wine); customWine = g.customWine; gfx = .from(flag: g.gfx)
-        copyProgram = g.copyProgram; retina = g.retina; msync = g.msync
+        copyProgram = g.copyProgram; retina = g.retina; msync = g.msync; esync = g.esync; vsync = g.vsync
         args = g.args; envs = g.envs; winetricks = g.winetricks
         selectedID = g.id
     }
@@ -166,6 +190,55 @@ final class Generator: ObservableObject {
 
     func generate() { launch(.generate) }
     func runProgram() { launch(.run) }
+    /// MoltenVK (Vulkan on Metal) is required by the DXVK backend. The GPTK runtime ships one,
+    /// otherwise it must come from Homebrew.
+    func checkMoltenVK() {
+        let fm = FileManager.default
+        var dirs = ["/opt/homebrew/lib", "/usr/local/lib"]
+        let cache = NSHomeDirectory() + "/Library/Caches/dmgexe"
+        for r in (try? fm.contentsOfDirectory(atPath: cache)) ?? [] {
+            let base = "\(cache)/\(r)"
+            for app in (try? fm.contentsOfDirectory(atPath: base)) ?? [] where app.hasSuffix(".app") {
+                dirs.append("\(base)/\(app)/Contents/Resources/wine/lib")
+            }
+        }
+        hasMoltenVK = dirs.contains { fm.fileExists(atPath: $0 + "/libMoltenVK.dylib") }
+    }
+
+    func installMoltenVK() {
+        guard let brew = ["/opt/homebrew/bin/brew", "/usr/local/bin/brew"].first(where: { FileManager.default.isExecutableFile(atPath: $0) }) else {
+            log = "Homebrew is needed to install MoltenVK. Opening its website: install it, then press Install MoltenVK again.\n"
+            NSWorkspace.shared.open(URL(string: "https://brew.sh")!)
+            return
+        }
+        log = "$ brew install molten-vk\n\n"
+        running = true
+        let p = Process()
+        proc = p
+        p.executableURL = URL(fileURLWithPath: brew)
+        p.arguments = ["install", "molten-vk"]
+        var env = ProcessInfo.processInfo.environment
+        env["HOMEBREW_NO_AUTO_UPDATE"] = "1"
+        p.environment = env
+        let pipe = Pipe()
+        p.standardOutput = pipe; p.standardError = pipe
+        pipe.fileHandleForReading.readabilityHandler = { [weak self] h in
+            let d = h.availableData
+            guard !d.isEmpty, let s = String(data: d, encoding: .utf8) else { return }
+            DispatchQueue.main.async { self?.log += s.replacingOccurrences(of: "\r", with: "\n") }
+        }
+        p.terminationHandler = { [weak self] proc in
+            pipe.fileHandleForReading.readabilityHandler = nil
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.running = false; self.proc = nil
+                self.checkMoltenVK()
+                self.log += self.hasMoltenVK ? "\n✅ MoltenVK installed.\n" : "\n❌ MoltenVK installation failed (exit code \(proc.terminationStatus)).\n"
+            }
+        }
+        do { try p.run() } catch { running = false; proc = nil; log += "Could not run brew: \(error)\n" }
+    }
+
     func stop() { proc?.terminate() }   // SIGTERM: dmgexe.sh stops the program and the wineserver
 
     private func launch(_ mode: Mode) {
@@ -189,6 +262,8 @@ final class Generator: ObservableObject {
         if mode == .generate && !copyProgram { a.append("--link") }
         if retina { a.append("--retina") }
         if !msync { a.append("--no-msync") }
+        if !esync { a.append("--no-esync") }
+        if !vsync { a.append("--no-vsync") }
         for s in shellSplit(args) { a += ["--arg", s] }
         for l in envs.split(separator: "\n") {
             let t = l.trimmingCharacters(in: .whitespaces)
@@ -270,7 +345,9 @@ struct ContentView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             PathRow(label: "Executable (.exe)", text: $g.exe, action: g.pickExe)
+                .help("The Windows program to launch. It must be inside the program folder.")
             PathRow(label: "Program folder", text: $g.dir, action: g.pickDir)
+                .help("Folder holding the program and all its files (data, DLLs...).")
             if !g.exe.isEmpty && !g.dir.isEmpty && !g.canGenerate && !g.running {
                 Text("The .exe must be inside the program folder.")
                     .foregroundColor(.red).font(.caption).padding(.leading, 138)
@@ -279,8 +356,11 @@ struct ContentView: View {
                 Text(mode == .run ? "Prefix name" : "App name").frame(width: 130, alignment: .trailing)
                 TextField("(defaults to the exe name)", text: $g.name).textFieldStyle(.roundedBorder)
             }
+            .help(mode == .run ? "Name of the Wine prefix (the fake Windows install) used to run the program."
+                               : "Name of the generated .app.")
             if mode == .generate {
                 PathRow(label: "Save to", text: $g.outDir, action: g.pickOut)
+                    .help("Folder where the generated .app is saved.")
             }
 
             Divider()
@@ -290,6 +370,7 @@ struct ContentView: View {
                     ForEach(Generator.WineChoice.allCases) { Text($0.rawValue).tag($0) }
                 }.labelsHidden().frame(width: 280)
             }
+            .help("The Wine build that runs the program. GPTK includes D3DMetal (best for DirectX 11/12); the others are plain Wine. It is downloaded once and cached.")
             if g.wineChoice == .custom {
                 PathRow(label: "", text: $g.customWine, action: g.pickWine)
             }
@@ -299,11 +380,38 @@ struct ContentView: View {
                     ForEach(Generator.Gfx.allCases) { Text($0.rawValue).tag($0) }
                 }.labelsHidden().frame(width: 280)
             }
+            .onAppear { g.checkMoltenVK() }
+            .help("Translates DirectX to the Mac's graphics API. Auto: let dmgexe choose. D3DMetal: DX11/12 via Metal (needs the GPTK runtime). DXVK: DX9/10/11 via Vulkan. OpenGL: software rendering, slow.")
+            if g.gfx == .dxvk && g.wineChoice == .gptk {
+                HStack {
+                    Spacer().frame(width: 130)
+                    Text("DXVK does not work with the GPTK runtime (it has no Vulkan). Use Wine Devel, Staging or Stable.")
+                        .foregroundColor(.orange).font(.caption)
+                }
+            }
+            if g.gfx == .dxvk && g.wineChoice != .gptk && !g.hasMoltenVK {
+                HStack {
+                    Spacer().frame(width: 130)
+                    Text("DXVK needs MoltenVK, which was not found on this Mac.")
+                        .foregroundColor(.orange).font(.caption)
+                    Button("Install MoltenVK", action: g.installMoltenVK).disabled(g.running)
+                        .help("Installs MoltenVK with Homebrew (brew install molten-vk). No restart needed.")
+                }
+            }
             HStack(spacing: 18) {
                 Spacer().frame(width: 130)
-                if mode == .generate { Toggle("Copy the program into the app", isOn: $g.copyProgram) }
+                if mode == .generate {
+                    Toggle("Link", isOn: Binding(get: { !g.copyProgram }, set: { g.copyProgram = !$0 }))
+                        .help("On: the app points to the original folder (small, instant, but the folder must stay where it is). Off: the program is copied inside the app. Running directly always links.")
+                }
                 Toggle("Retina", isOn: $g.retina)
+                    .help("Render at the screen's native resolution. Sharper but slower.")
                 Toggle("MSYNC", isOn: $g.msync)
+                    .help("Faster thread synchronization using macOS-native primitives. Disable only if the program hangs or fails to start.")
+                Toggle("ESYNC", isOn: $g.esync)
+                    .help("Alternative thread synchronization based on file descriptors. Used if MSYNC is unavailable. Disable on 'too many open files' errors.")
+                Toggle("VSync", isOn: $g.vsync)
+                    .help("Sync frames to the display refresh rate. Turning it off only takes effect with the DXVK backend; otherwise use the program's own settings.")
             }
 
             DisclosureGroup("Advanced") {
@@ -312,16 +420,19 @@ struct ContentView: View {
                         Text("Arguments").frame(width: 130, alignment: .trailing)
                         TextField("--fullscreen \"--foo bar\"", text: $g.args).textFieldStyle(.roundedBorder)
                     }
+                    .help("Command-line arguments passed to the program. Quote values that contain spaces.")
                     HStack {
                         Text("Winetricks").frame(width: 130, alignment: .trailing)
                         TextField("vcrun2022 dotnet48", text: $g.winetricks).textFieldStyle(.roundedBorder)
                     }
+                    .help("Winetricks components to install on first launch (e.g. vcrun2022). Requires winetricks to be installed.")
                     HStack(alignment: .top) {
                         Text("Variables (K=V,\none per line)").multilineTextAlignment(.trailing)
                             .frame(width: 130, alignment: .trailing)
                         TextEditor(text: $g.envs).font(.system(.body, design: .monospaced))
                             .frame(height: 54).border(Color.gray.opacity(0.4))
                     }
+                    .help("Extra environment variables for Wine, one KEY=VALUE per line (e.g. WINEDEBUG=-all).")
                 }.padding(.top, 6)
             }
 
