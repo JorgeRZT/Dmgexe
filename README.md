@@ -50,11 +50,49 @@ launches the program right away without creating anything (it can be stopped
 with the **Stop** button). Both tabs share the same settings and the same
 prefix, so a program set up in one behaves the same in the other.
 
-The sidebar is a **library**. Press **Save to library** to store the current form
-(executable, folder, runtime source, graphics backend, arguments, variables…) as
-a bookmark. Click an entry to load its settings, or press its ▶ button (or
-right-click → Run) to launch it straight away. The library is stored in
-`~/Library/Application Support/Dmgexe/library.json`.
+The main window is a **library** shown as a grid of cards. Press **Add program**
+to open the settings form, fill it in and press **Save to library** to store the
+current form (executable, folder, runtime source, graphics backend, arguments,
+variables…) as a card.
+
+- **Click a card** to launch the program straight away (a spinner shows while it
+  runs, and **Stop** appears at the top).
+- **Right-click a card** for **Run**, **Settings…** (reopens the form to edit it),
+  **Cover** and **Delete**.
+- The toggle at the top switches the grid between **vertical** (2:3) and
+  **horizontal** (16:9) cards. The choice is remembered.
+
+The library is stored in `~/Library/Application Support/Dmgexe/library.json`.
+
+#### Covers
+
+Each program can have a vertical and a horizontal cover, set independently from
+local image files: right-click → **Cover** → **Set vertical / horizontal cover…**,
+or click the small thumbnails at the top of the settings form. Images are copied
+to `~/Library/Application Support/Dmgexe/covers/`. A card only shows the cover of
+the current style; without one it shows a placeholder with the program's name.
+Replacing or removing a cover (or deleting the program) deletes the copied file.
+
+#### Detection and suggestions
+
+When an executable is chosen, the form inspects it (without running it) and the
+DLLs next to it, and shows under **Graphics**:
+
+- the **architecture** (32 or 64-bit, from the PE header);
+- the **graphics APIs it can use** (OpenGL, DirectX 9, 10/11, 12, Vulkan), found
+  from the names of the graphics DLLs it links or loads;
+- a **Suggested** line with an **Apply** button that proposes the runtime, the
+  graphics backend and the winetricks verbs it seems to need: GPTK for DirectX
+  11/12, a regular Wine with DXVK for DirectX 9, and verbs such as `vcrun2022`,
+  `dotnet48` or `d3dx9` for the redistributables it links but does not ship.
+  Apply only fills the form; it never overrides a runtime or backend that looks
+  like a deliberate choice, and nothing changes until you press it.
+
+This is a static guess: it says what a program can use, not what it ends up
+using, and it cannot see inside packed executables. Having OpenGL in the list does
+not mean the OpenGL backend is needed: programs that use OpenGL run with the
+other backends through the Mac's own (hardware) OpenGL. The OpenGL backend is CPU
+software rendering and shows a warning.
 
 The app is ad-hoc signed only. If macOS blocks it, right-click it and choose
 **Open**.
@@ -178,6 +216,9 @@ program** tab streams the same output).
   generate the app without `--link`.
 - **Choosing a runtime**: `gptk` is the best option for Direct3D 11/12; a recent
   `devel` runtime is better for everything else.
+- **A winetricks verb was added but nothing was installed**: verbs are installed
+  once per prefix. Use another prefix name, or delete `.winetricks-done` in
+  `~/Library/Application Support/<Name>/`, to install a changed list.
 
 ## Limitations
 
@@ -191,6 +232,8 @@ program** tab streams the same output).
   require pipeline-statistics queries, which MoltenVK does not support.
 - `--no-vsync` only takes effect with `--gfx dxvk`; with D3DMetal use the
   program's own settings.
+- The detection in the GUI is a heuristic (see above) and winetricks verbs such as
+  `dotnet48` are not guaranteed to install on every runtime.
 - A native macOS build of a program, when it exists, will almost always perform
   better than any compatibility layer.
 - Apps with an embedded runtime are not signed; if macOS blocks one, run
