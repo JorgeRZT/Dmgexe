@@ -45,7 +45,7 @@ Choose the `.exe`, check the program folder, pick a runtime source and press
 **Generate .app**. The log shows progress and, when finished, buttons to reveal
 or open the result.
 
-The window has two tabs: **Generate app** creates a `.app`, and **Run program**
+The settings form has two tabs: **Generate app** creates a `.app`, and **Run program**
 launches the program right away without creating anything (it can be stopped
 with the **Stop** button). Both tabs share the same settings and the same
 prefix, so a program set up in one behaves the same in the other.
