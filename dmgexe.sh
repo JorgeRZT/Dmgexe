@@ -927,6 +927,8 @@ RES="$(cd "$(dirname "$0")/../Resources" && pwd)"
 SUPPORT="$HOME/Library/Application Support/$APP_NAME"
 LOG="$SUPPORT/launcher.log"
 mkdir -p "$SUPPORT"
+# the log is appended to forever (DXVK alone wrote 140 MB for one game): keep the last one over 5 MB as .old
+if [[ -f "$LOG" && "$(stat -f %z "$LOG" 2>/dev/null || echo 0)" -gt 5242880 ]]; then mv -f "$LOG" "$LOG.old"; fi
 # Where the Windows prefix is (same rules as prefix_dir_of in dmgexe.sh): an explicit --prefix-dir; else where
 # this app already has it; else <folder chosen in Dmgexe's Storage>/<name>/prefix; else the default place.
 CONFIG="$HOME/Library/Application Support/Dmgexe/config"
@@ -998,7 +1000,7 @@ for kv in "${EXTRA_ENV[@]}"; do export "$kv"; done
 # Prefix templates: a prefix built with this runtime and this list of winetricks components is kept in
 # TEMPLATE_ROOT and cloned for every other app that asks for the same (APFS clone: no extra space).
 TKEY=""; TDIR=""; FRESH=0
-if [[ $TEMPLATES -eq 1 && -n "$WINETRICKS" && ! -f "$SUPPORT/.winetricks-done" ]] && command -v shasum >/dev/null 2>&1; then
+if [[ $TEMPLATES -eq 1 && -n "$WINETRICKS" && ! -f "$WINEPREFIX/system.reg" ]] && command -v shasum >/dev/null 2>&1; then
   RUNTIME_ID="$("${RUN[@]}" "$WINE" --version 2>/dev/null)"
   TKEY="$({ echo "$RUNTIME_ID"; shasum -a 256 "$WINE" | cut -d' ' -f1; echo "$WIN32 $(uname -m)"
             # shellcheck disable=SC2086
@@ -1017,7 +1019,7 @@ if [[ ! -f "$WINEPREFIX/system.reg" ]]; then
   if [[ -n "$TKEY" && -f "$TDIR/.ok" ]] && clone_prefix "$TDIR/prefix" "$WINEPREFIX" && [[ -f "$WINEPREFIX/system.reg" ]]; then
     echo "creating prefix at $WINEPREFIX from the saved template $TKEY ($WINETRICKS)"
     osascript -e "display notification \"Preparing the Windows environment from a saved template…\" with title \"$APP_NAME\"" >/dev/null 2>&1
-    touch "$SUPPORT/.winetricks-done"
+    echo "$WINETRICKS" > "$SUPPORT/.winetricks-done"
   else
     echo "creating prefix at $WINEPREFIX with $WINE"
     osascript -e "display notification \"Preparing the Windows environment (first launch only)…\" with title \"$APP_NAME\"" >/dev/null 2>&1
@@ -1027,29 +1029,38 @@ if [[ ! -f "$WINEPREFIX/system.reg" ]]; then
   fi
 fi
 
-# Optional winetricks (once). It runs first, on the plain prefix: with DXVK already installed every
-# Wine process an installer starts would also start Vulkan (slow, and it floods the log). Some verbs
-# (dotnet) change the Windows version themselves, so the version below is applied after them.
-if [[ -n "$WINETRICKS" && ! -f "$SUPPORT/.winetricks-done" ]]; then
-  WT="$(command -v winetricks || true)"
-  if [[ -n "$WT" ]]; then
-    echo "installing winetricks components: $WINETRICKS (first launch only; this can take many minutes, .NET the longest)"
-    osascript -e "display notification \"Installing dependencies ($WINETRICKS)… this can take a while\" with title \"$APP_NAME\"" >/dev/null 2>&1
-    # shellcheck disable=SC2086
-    if "${RUN[@]}" "$WT" -q $WINETRICKS; then
-      touch "$SUPPORT/.winetricks-done"
-      # keep this clean prefix as a template for the next app that asks for the same components
-      if [[ $FRESH -eq 1 && -n "$TKEY" && ! -f "$TDIR/.ok" ]]; then
-        "${RUN[@]}" "$(dirname "$WINE")/wineserver" -w 2>/dev/null
-        TMP_T="$TDIR.tmp.$$"; rm -rf "$TMP_T"
-        if mkdir -p "$TMP_T" && clone_prefix "$WINEPREFIX" "$TMP_T/prefix"; then
-          printf '%s\t%s\t%s\n' "$(echo $WINETRICKS | tr ' ' '\n' | sort -u | tr '\n' ',' | sed 's/,$//')" "$RUNTIME_ID" "$(date +%Y-%m-%d)" > "$TMP_T/info"
-          touch "$TMP_T/.ok"; rm -rf "$TDIR"; mv "$TMP_T" "$TDIR" && echo "saved prefix template $TKEY"
-        else rm -rf "$TMP_T"; fi
+# Optional winetricks. It runs first, on the plain prefix: with DXVK already installed every Wine process an
+# installer starts would also start Vulkan (slow, and it floods the log). Some verbs (dotnet) change the Windows
+# version themselves, so the version below is applied after them.
+# Only the verbs this prefix does not have yet are installed: those in winetricks.log (what winetricks itself
+# recorded) and those in .winetricks-done (what was already tried here) are skipped, so a verb added to the list
+# later is installed, and one that succeeds without being recorded is not retried at every launch.
+if [[ -n "$WINETRICKS" ]]; then
+  KNOWN="$(cat "$WINEPREFIX/winetricks.log" "$SUPPORT/.winetricks-done" 2>/dev/null | tr '\n' ' ')"
+  TODO=""
+  for v in $WINETRICKS; do case " $KNOWN " in *" $v "*) ;; *) TODO="$TODO $v";; esac; done
+  TODO="${TODO# }"
+  if [[ -n "$TODO" ]]; then
+    WT="$(command -v winetricks || true)"
+    if [[ -n "$WT" ]]; then
+      echo "installing winetricks components: $TODO (this can take many minutes, .NET the longest)"
+      osascript -e "display notification \"Installing dependencies ($TODO)… this can take a while\" with title \"$APP_NAME\"" >/dev/null 2>&1
+      # shellcheck disable=SC2086
+      if "${RUN[@]}" "$WT" -q $TODO; then
+        echo "$TODO" >> "$SUPPORT/.winetricks-done"
+        # keep this clean prefix as a template for the next app that asks for the same components
+        if [[ $FRESH -eq 1 && -n "$TKEY" && ! -f "$TDIR/.ok" ]]; then
+          "${RUN[@]}" "$(dirname "$WINE")/wineserver" -w 2>/dev/null
+          TMP_T="$TDIR.tmp.$$"; rm -rf "$TMP_T"
+          if mkdir -p "$TMP_T" && clone_prefix "$WINEPREFIX" "$TMP_T/prefix"; then
+            printf '%s\t%s\t%s\n' "$(echo $WINETRICKS | tr ' ' '\n' | sort -u | tr '\n' ',' | sed 's/,$//')" "$RUNTIME_ID" "$(date +%Y-%m-%d)" > "$TMP_T/info"
+            touch "$TMP_T/.ok"; rm -rf "$TDIR"; mv "$TMP_T" "$TDIR" && echo "saved prefix template $TKEY"
+          else rm -rf "$TMP_T"; fi
+        fi
       fi
+    else
+      echo "winetricks is not installed; skipping ($TODO)"
     fi
-  else
-    echo "winetricks is not installed; skipping ($WINETRICKS)"
   fi
 fi
 
@@ -1098,7 +1109,15 @@ if [[ "$GFX" == dxvk && -d "$RES/dxvk" ]]; then
     alert "DXVK needs MoltenVK, which is not installed. Install it with: brew install molten-vk (or open Dmgexe and use the Install MoltenVK button)."
     exit 1
   fi
-  [[ $VSYNC -eq 0 ]] && export DXVK_CONFIG="${DXVK_CONFIG:+$DXVK_CONFIG; }d3d9.presentInterval = 0; dxgi.syncInterval = 0"
+  # --no-vsync: DXVK 1.10 only reads a config FILE (DXVK_CONFIG_FILE; the DXVK_CONFIG variable came later), and it
+  # runs inside Wine, so the path must be a Windows one (Z: is the Mac's root)
+  if [[ $VSYNC -eq 0 ]]; then
+    printf 'd3d9.presentInterval = 0\ndxgi.syncInterval = 0\n' > "$SUPPORT/dxvk.conf"
+    export DXVK_CONFIG_FILE="${DXVK_CONFIG_FILE:-Z:${SUPPORT//\//\\}\\dxvk.conf}"
+  else
+    rm -f "$SUPPORT/dxvk.conf"
+  fi
+  export DXVK_LOG_LEVEL="${DXVK_LOG_LEVEL:-warn}"   # at "info" DXVK writes about 100 lines for every process
   if [[ ! -f "$SUPPORT/.dxvk-done" ]]; then
     echo "installing DXVK into the prefix"
     [[ -d "$RES/dxvk/x64" ]] && cp -f "$RES/dxvk/x64/"*.dll "$WINEPREFIX/drive_c/windows/system32/"

@@ -346,7 +346,9 @@ On first launch the launcher, in this order:
 5. runs the exe from its own folder (or the installed program, from the prefix).
 
 Everything the launcher does is logged to `~/Library/Application Support/<Name>/launcher.log`;
-that file is the first place to look when something fails. The same folder holds small markers
+that file is the first place to look when something fails (it is kept to about 5 MB: a bigger one
+becomes `launcher.log.old` at the next launch, and DXVK only logs warnings unless you set
+`DXVK_LOG_LEVEL`). The same folder holds small markers
 (`.winetricks-done`, `.retina-*`, `.winver-*`, `.prefix-path`...) that remember what was already
 set up. Switching an app from `--gfx opengl` to another backend restores the original files in
 its prefix.
@@ -356,7 +358,7 @@ its prefix.
 | Where | What |
 | --- | --- |
 | `~/Library/Application Support/Dmgexe/` | `library.json` (the library), `covers/`, `config` (folder for new prefixes) |
-| `~/Library/Application Support/<Name>/` | `launcher.log`, setup markers, and the `prefix/` unless it was put elsewhere |
+| `~/Library/Application Support/<Name>/` | `launcher.log` (+ `.old`), `dxvk.conf` with `--no-vsync`, setup markers, and the `prefix/` unless it was put elsewhere |
 | `~/Library/Caches/dmgexe/` | downloaded runtimes, DXVK, Mesa and `d3dcompiler_47`; `prefix-templates/` (override with `DMGEXE_CACHE`) |
 | `~/.cache/winetricks/` or `~/Library/Caches/winetricks/` | what winetricks downloaded (see Storage) |
 
@@ -400,9 +402,9 @@ program** tab streams the same output).
   generate the app without `--link`.
 - **Choosing a runtime**: `gptk` is the best option for Direct3D 11/12; a recent
   `devel` runtime is better for everything else.
-- **A winetricks verb was added but nothing was installed**: verbs are installed
-  once per prefix. Delete the prefix in **Storage** (or use another app name) to
-  install a changed list.
+- **A verb was added to the winetricks list**: at the next launch only the verbs the prefix
+  does not have yet are installed (it compares with the prefix's `winetricks.log`). Verbs cannot
+  be removed one by one; delete the prefix in **Storage** to start clean.
 - **The first launch takes very long**: see [Slow first launch](#slow-first-launch). It is
   almost always `dotnet40`/`dotnet48`.
 - **A DirectX 9 game shows a black screen (the cursor is visible)** with the `gptk` runtime:
@@ -424,8 +426,9 @@ program** tab streams the same output).
 - `--gfx opengl` is software rendering and is slow by nature; `--gfx dxvk` uses
   an old build (1.10.3), needs a non-`gptk` runtime, and fails on programs that
   require pipeline-statistics queries, which MoltenVK does not support.
-- `--no-vsync` only takes effect with `--gfx dxvk`; with D3DMetal use the
-  program's own settings.
+- `--no-vsync` only takes effect with `--gfx dxvk` (it writes a `dxvk.conf` next to the app's
+  log and points DXVK at it); with D3DMetal use the program's own settings. A program that
+  asks for exclusive fullscreen may still present synchronised.
 - The detection in the GUI is a heuristic (see above) and winetricks verbs such as
   `dotnet48` are not guaranteed to install on every runtime.
 - A native macOS build of a program, when it exists, will almost always perform
@@ -495,7 +498,7 @@ gui/svg2png.swift    SVG -> PNG helper used by the build
 gui/build.sh         builds Dmgexe.app
 tests/run.sh         test runner
 tests/lib.sh         sandbox and assertions
-tests/test_*.sh      the tests, by area (cli, generate, launcher, run, install, prefix, bottles,
+tests/test_*.sh      the tests, by area (cli, generate, launcher, dxvk, run, install, prefix, bottles,
                      winver, templates, storage, processes, gui)
 tests/fixtures/      the fake Wine, wineserver, winetricks and osascript
 ```

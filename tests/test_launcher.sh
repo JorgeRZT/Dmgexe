@@ -213,3 +213,69 @@ test_moltenvk_log_level_can_be_overridden() {
   gen --env MVK_CONFIG_LOG_LEVEL=3; launch "$(APP_DEMO)"
   assert_file_has "$FAKE_WINE_LOG" "env MVK_CONFIG_LOG_LEVEL=3"
 }
+
+# --- components added after the first launch ---------------------------------------------------
+# Regression: the marker ".winetricks-done" meant "never run winetricks again", so a verb added to the list
+# later (d3dx10 after d3dx9 vcrun2008) was silently never installed.
+
+test_a_verb_added_later_is_installed() {
+  gen --winetricks "d3dx9 vcrun2008"; launch "$(APP_DEMO)"
+  gen --winetricks "d3dx9 vcrun2008 d3dx10"; : > "$FAKE_TRICKS_LOG"
+  launch "$(APP_DEMO)"; assert_rc 0
+  assert_file_has "$FAKE_TRICKS_LOG" "winetricks -q d3dx10"
+  assert_file "$(prefix_of Demo)/drive_c/windows/system32/d3dx10.dll"
+}
+
+test_only_the_missing_verbs_are_installed() {
+  gen --winetricks "d3dx9 vcrun2008"; launch "$(APP_DEMO)"
+  gen --winetricks "d3dx9 vcrun2008 d3dx10"; : > "$FAKE_TRICKS_LOG"
+  launch "$(APP_DEMO)"
+  assert_eq "$(cat "$FAKE_TRICKS_LOG")" "winetricks -q d3dx10"
+}
+
+test_nothing_is_installed_when_nothing_is_missing() {
+  gen --winetricks "d3dx9 vcrun2008"; launch "$(APP_DEMO)"
+  gen --winetricks "vcrun2008"; : > "$FAKE_TRICKS_LOG"                     # fewer verbs than before
+  launch "$(APP_DEMO)"
+  assert_eq "$(cat "$FAKE_TRICKS_LOG")" ""
+}
+
+test_a_verb_that_winetricks_does_not_record_is_not_retried_every_launch() {
+  # a verb that succeeds without leaving a line in winetricks.log must not make every launch run winetricks again
+  gen --winetricks "quiet-verb"
+  cat > "$SB/fakebin/winetricks" <<'WT'
+#!/bin/bash
+echo "winetricks $*" >> "$FAKE_TRICKS_LOG"
+exit 0
+WT
+  chmod +x "$SB/fakebin/winetricks"
+  launch "$(APP_DEMO)"; launch "$(APP_DEMO)"; launch "$(APP_DEMO)"
+  assert_count "$FAKE_TRICKS_LOG" "winetricks -q quiet-verb" 1
+}
+
+test_a_failed_verb_is_retried_at_the_next_launch() {
+  gen --winetricks "vcrun2008"
+  FAKE_TRICKS_RC=1 launch "$(APP_DEMO)"
+  : > "$FAKE_TRICKS_LOG"
+  launch "$(APP_DEMO)"
+  assert_file_has "$FAKE_TRICKS_LOG" "winetricks -q vcrun2008"
+  assert_file "$(prefix_of Demo)/drive_c/windows/system32/vcrun2008.dll"
+}
+
+test_an_old_style_marker_does_not_hide_missing_verbs() {
+  # prefixes made by earlier versions have an empty ".winetricks-done"
+  gen --winetricks "d3dx9"; launch "$(APP_DEMO)"
+  : > "$SUPPORT_ROOT/Demo/.winetricks-done"
+  gen --winetricks "d3dx9 d3dx10"; : > "$FAKE_TRICKS_LOG"
+  launch "$(APP_DEMO)"
+  assert_eq "$(cat "$FAKE_TRICKS_LOG")" "winetricks -q d3dx10"
+}
+
+test_a_prefix_cloned_from_a_template_installs_only_what_was_added_since() {
+  gen --winetricks "vcrun2008"; launch "$(APP_DEMO)"
+  dmg -e game.exe -d "$PROG" -n Other -o "$OUTD" --winetricks "vcrun2008"
+  launch "$OUTD/Other.app"                                                 # cloned
+  dmg -e game.exe -d "$PROG" -n Other -o "$OUTD" --winetricks "vcrun2008 d3dx9"; : > "$FAKE_TRICKS_LOG"
+  launch "$OUTD/Other.app"
+  assert_eq "$(cat "$FAKE_TRICKS_LOG")" "winetricks -q d3dx9"
+}
