@@ -1,0 +1,3 @@
+#!/bin/bash
+echo "wineserver $* prefix=${WINEPREFIX:-}" >> "${FAKE_WINE_LOG:-/dev/null}"
+exit 0

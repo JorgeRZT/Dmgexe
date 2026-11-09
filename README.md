@@ -28,9 +28,13 @@ It comes in two parts:
 ## Requirements
 
 - A Mac, ideally Apple Silicon (macOS 13 or later for the GUI).
-- On Apple Silicon, the x86_64 translation layer must be installed.
+- On Apple Silicon, the x86_64 translation layer (Rosetta 2) must be installed.
 - Xcode command-line tools (`swiftc`) to build the GUI.
 - Internet access when using `--fetch-wine`, `--gfx dxvk` or `--gfx opengl`.
+- Optional: [winetricks](https://github.com/Winetricks/winetricks) (`brew install winetricks`) for
+  `--winetricks` components, and MoltenVK (`brew install molten-vk`, or the **Install MoltenVK**
+  button) for `--gfx dxvk` with a runtime that does not bundle it.
+- Everything else (`python3`, `rsync`, `sips`, `iconutil`, `codesign`, `lsof`, `ps`) ships with macOS.
 
 ## Quick start
 
@@ -83,8 +87,10 @@ DLLs next to it, and shows under **Graphics**:
   from the names of the graphics DLLs it links or loads;
 - a **Suggested** line with an **Apply** button that proposes the runtime, the
   graphics backend and the winetricks verbs it seems to need: GPTK for DirectX
-  11/12, a regular Wine with DXVK for DirectX 9, and verbs such as `vcrun2022`,
-  `dotnet48` or `d3dx9` for the redistributables it links but does not ship.
+  11/12, a regular Wine with DXVK for DirectX 9, and verbs such as `vcrun2022`
+  or `d3dx9` for the redistributables it links but does not ship. `dotnet48` is
+  only suggested for a program that really is a .NET assembly (it is a slow
+  install, and many native programs mention `mscoree.dll` without needing it).
   Apply only fills the form; it never overrides a runtime or backend that looks
   like a deliberate choice, and nothing changes until you press it.
 
@@ -97,6 +103,123 @@ software rendering and shows a warning.
 The app is ad-hoc signed only. If macOS blocks it, right-click it and choose
 **Open**.
 
+### Programs that are not installed yet (`setup.exe`)
+
+Dmgexe normally wraps a program that already runs from a folder. A program that
+ships as an installer needs one more step, and there is a mode for it. In the form,
+tick **This is an installer (setup.exe)**, choose the setup file and press
+**Install & generate .app** (or **Install & run** in the other tab):
+
+1. The installer runs inside the app's own Windows prefix, with the runtime, graphics
+   backend, Windows version, variables and winetricks verbs of the form. Use a proper
+   **App name**: it names the prefix (for a file called `setup.exe` the folder name is proposed).
+2. Dmgexe waits for every process the installer started, compares the prefix before
+   and after, and looks for the program that was installed. Wine's own programs,
+   temporary files, uninstallers, redistributables and crash handlers are ignored.
+3. If one program clearly stands out (it is in `Program Files`, is named like the
+   folder or the app...), it is used. Otherwise a window asks which one starts it;
+   the installer is **not** run again.
+4. The `.app` points to the installed program inside the prefix. Nothing is copied
+   into the app. The library card remembers the installed program, so clicking it
+   launches it directly. **Install again** forgets it and runs the installer again.
+
+Because the program lives in its prefix, an app made this way only works on the Mac
+where it was installed.
+
+### Where the Windows prefix lives
+
+The prefix (the installed program, its saved games, Wine's own files, hundreds of MB
+at least) is the part that takes space on the Mac. By default it is
+`~/Library/Application Support/<App name>/prefix`. You can move it to another drive in two ways:
+
+- **For every program**: in **Storage → Where new prefixes are created** choose a folder, for
+  example `/Volumes/Disk/Bottles`. New prefixes are created in `<folder>/<App name>/prefix`;
+  prefixes that already exist stay where they are until you press **Move to folder** on them.
+- **For one program**: fill **Install location** in its form (or pass `--prefix-dir`). That
+  program keeps its own place whatever the global folder says, and it cannot be changed after
+  installing.
+
+Either way the drive must be connected whenever the program runs: the app says so if it is not,
+and it never starts a new empty prefix in its place. It also works for ordinary programs, not
+only for installers. Only small files (the log, a few markers) stay on the Mac.
+
+### Windows version
+
+The **Windows version** selector (`--winver`) sets the version Wine reports to the program,
+like the Windows version of a CrossOver bottle. Use it for a program that refuses to start
+(or misbehaves) unless it sees Windows XP or 7, or one that needs 10. It is written into the
+prefix once, before anything runs (installers included), and changing it later rewrites it;
+"Runtime default" removes it again. It does not install another Windows: the API underneath is
+Wine's. Windows 11 needs a recent runtime (the GPTK one is old and may not know it), and a real
+32-bit XP prefix is not available because current Wine builds for Mac are 64-bit only.
+
+### Storage
+
+The **Storage** button of the library (it turns orange and shows a count while Wine processes are
+running) opens a window with:
+
+- **Running now**: the Wine processes alive at this moment, grouped by program, each with a
+  **Stop** button, plus **Stop all**. A closed program often leaves Wine's own services
+  (`services.exe`, `winedevice.exe`...) behind; they keep the prefix busy, so it cannot be deleted
+  or moved until they are stopped. Stopping asks the prefix's wineserver to close everything,
+  then terminates and finally kills what is left. A process belongs to a program when its working
+  directory or an open file is inside the prefix (or inside its wineserver's folder).
+- **Where new prefixes are created**: one folder for every program (for example on an external
+  drive), instead of `~/Library/Application Support`. It applies to everything made or run
+  afterwards, installers included. A prefix that already exists stays where it is until you press
+  **Move to folder** on it (a copy first when the drive is different; nothing is lost if it fails).
+  A program with its own **Install location** keeps that one. If a prefix is on a drive that is not
+  connected the app says so; it never starts a new empty prefix in its place.
+- every **Windows prefix** (one per program, including those kept on another drive) with its size,
+  the winetricks components installed in it, whether a library program uses it, and whether the
+  library asks for components that are missing. **Delete…** removes the prefix after asking, and is
+  refused while a program runs in it. The program builds a new one at its next launch (in the
+  folder set above). A program installed from a `setup.exe` lives in its prefix, so deleting it means
+  installing again.
+- the **prefix templates** (see above), with their components, runtime and size.
+- the **winetricks downloads** (installers cached by winetricks), per component, with a button
+  to delete one or all. This frees space and does not affect the components already installed.
+
+Individual winetricks components cannot be uninstalled: winetricks installs them into the
+prefix and has no general way to remove them, so the only way to drop one is a new prefix.
+The chosen folder is saved in `~/Library/Application Support/Dmgexe/config` (`prefix_root=…`),
+which the generated apps read when they start. Everything the window does is also available
+from the command line: `--list-wine`, `--stop-wine
+NAME|all|pid:N`, `--get-prefix-root`, `--set-prefix-root DIR|default`, `--move-prefix NAME`,
+`--list-prefixes`, `--delete-prefix NAME`, `--list-templates`, `--delete-template KEY|all`,
+`--list-cache`, `--delete-cache VERB|all`.
+
+### Prefix templates
+
+Installing winetricks components is slow, so Dmgexe does it once per combination. The first
+prefix built with a given runtime and list of components (`dotnet48`, `vcrun2022`…, in any
+order) is kept as a **template** in `~/Library/Caches/dmgexe/prefix-templates`, and every later
+app asking for the same starts from a copy of it: no winetricks, no `wineboot`, seconds instead
+of minutes. On the same APFS drive the copy is a clone, which takes no extra space until
+something changes; on another drive (for example `--prefix-dir` on an external disk) it is a
+real copy, still much faster than installing.
+
+- The template is taken right after winetricks, before the program or an installer touches the
+  prefix, so it never contains a program or its saved games. The Windows version, Retina,
+  graphics backend and the program itself are applied to each app separately.
+- A template is only used for the same runtime (Wine version and build) and the same
+  components. A different runtime, 32-bit prefix or component list builds its own.
+- Nothing is saved if winetricks fails, or if the prefix already existed.
+- `--no-template` turns it off. **Storage** lists the templates and deletes them; deleting one
+  does not affect prefixes made from it. Components added later to an existing prefix are
+  installed in place, as before.
+
+### Slow first launch
+
+The first launch of an app with winetricks components installs them, and that can take a long
+time: `dotnet40`/`dotnet48` run Microsoft's installers under Wine and take the longest (10–30
+minutes, and they often do not work on a 64-bit prefix), `vcrun*` and `d3dx*` take seconds. Only
+ask for what the program needs; most native games do not need .NET. The components are installed
+on the plain prefix before the graphics backend is set up (so DXVK does not slow every process
+the installers start), and the chosen Windows version is applied afterwards. If you stop the
+launch in the middle, the next one starts the installation again: delete the half-built prefix
+in **Storage** first.
+
 ### Command line
 
 ```bash
@@ -105,6 +228,23 @@ The app is ad-hoc signed only. If macOS blocks it, right-click it and choose
 ```
 
 `-e` may be absolute or relative to `-d`, and must be inside it.
+
+For an installer:
+
+```bash
+# run setup.exe in the prefix of "My Program", detect what it installed, make the app
+./dmgexe.sh --install -e ~/Downloads/MyProgram/setup.exe -n "My Program" \
+            --fetch-wine devel -o ~/Desktop
+```
+
+When the installer leaves several candidates (and the terminal is not interactive)
+the command lists them as `candidate: drive_c/...` lines and exits with code 3.
+The installation is kept; choose one and run again without the installer:
+
+```bash
+./dmgexe.sh -n "My Program" --installed-exe "C:\Program Files\My Program\program.exe" \
+            --fetch-wine devel -o ~/Desktop
+```
 
 ## Options
 
@@ -119,6 +259,18 @@ The app is ad-hoc signed only. If macOS blocks it, right-click it and choose
 | `--embed-wine` | Copy the runtime into the app (self-contained, larger). |
 | `--fetch-wine K` | Download and cache a runtime build and embed it: `stable`, `devel`, `staging` or `gptk`. |
 | `--gfx G` | Graphics backend: `auto` (default), `d3dmetal` (DX11/12, use with `gptk`), `dxvk` (DX9/10/11) or `opengl` (OpenGL 4.6 compatibility profile, rendered in software: slow). |
+| `--install` | `-e` is an installer. Run it in the prefix of `--name`, detect the installed program and build the app (or `--run` it) from that. Exit code 3 if the program must be chosen. |
+| `--installed-exe PATH` | Program already installed in the prefix of `--name` (`C:\...`, `Program Files/...` or `drive_c/...`). `-e` and `-d` are not needed; nothing is copied. |
+| `--winver V` | Windows version Wine reports to the program: `xp`, `7`, `8`, `8.1`, `10` or `11` (default: the runtime's own). Also applied before an installer runs. |
+| `--prefix-dir DIR` | Keep the Windows prefix in `DIR` instead of `~/Library/Application Support/<Name>/prefix` (e.g. on an external volume). Repeat it with `--installed-exe` if you use it with `--install`. |
+| `--list-wine` / `--stop-wine T` | Print the Wine processes running now (with the program they belong to) / stop those of program `T`, of every program (`all`) or one (`pid:N`). |
+| `--get-prefix-root` / `--set-prefix-root DIR` | Print / set the folder where new prefixes are created for every program (`default` resets it). |
+| `--move-prefix NAME` | Move the prefix of `NAME` to that folder. |
+| `--list-prefixes` / `--list-cache` | Print the Windows prefixes / winetricks downloads and their sizes (tab separated), then exit. |
+| `--delete-prefix NAME` / `--delete-cache VERB` | Delete the prefix of app `NAME` / the cached downloads of a verb (`all` for every one), then exit. |
+| `--no-template` | Do not reuse or save prefix templates. |
+| `--list-templates` / `--delete-template KEY` | Print the prefix templates / delete one (`all` for every one), then exit. |
+| `--wait` | With `--run`, also wait for every process the program started (used by `--install`). |
 | `--run` | Do not keep an app: run the program right away (output is streamed) and clean up when it exits. |
 | `--link` | Do not copy the program into the app; point to the original folder. |
 | `--arg ARG` | Argument for the exe (repeatable). |
@@ -148,7 +300,26 @@ a single command; command-line options override the profile.
 NAME="My Program"; DIR="./ProgramFolder"; EXE="bin/program.exe"
 FETCH=gptk; GFX=d3dmetal
 ARGS=(--windowed); ENVS=(WINEDEBUG=-all); WINETRICKS="vcrun2022"
+WINVER=win7; PREFIX_OVERRIDE="/Volumes/Disk/Games/MyProgram/prefix"; TEMPLATES=1
+# for an installer: INSTALL=1 (EXE is then the setup program), or INSTALLED_EXE="drive_c/Program Files/..."
 ```
+
+## Tests
+
+```bash
+tests/run.sh              # the whole suite (a few minutes)
+tests/run.sh install      # only the tests whose name contains "install"
+tests/run.sh --gui        # also compile the SwiftUI front-end
+```
+
+The tests that deal with running processes use copies of `sleep` named like Wine's programs, and
+`DMGEXE_PROCESS_ROOT` (set by the test-suite) limits the process search to the test's own folder,
+so the suite can never see or stop the Wine programs you are really running.
+
+The tests use a fake Wine (`tests/fixtures`) that records what it is asked to run and
+can simulate an installer, so they need no Wine, no network and never touch your
+real `~/Library`: every test gets its own `HOME`. The SwiftUI code is only compiled,
+there are no UI tests.
 
 ## How the generated app works
 
@@ -165,16 +336,29 @@ My Program.app/Contents/
 └── Info.plist
 ```
 
-On first launch the launcher creates a prefix in
-`~/Library/Application Support/<Name>/prefix`, installs the native
-`d3dcompiler_47` and the selected graphics backend, applies any winetricks verbs,
-then runs the exe from its own folder. Everything the launcher does is logged to
-`~/Library/Application Support/<Name>/launcher.log`; that file is the first place
-to look when something fails. Switching an app from `--gfx opengl` to another
-backend restores the original files in its prefix.
+On first launch the launcher, in this order:
 
-Downloads are cached in `~/Library/Caches/dmgexe` (override with the
-`DMGEXE_CACHE` environment variable).
+1. finds the prefix (see [Where the Windows prefix lives](#where-the-windows-prefix-lives))
+   and creates it, from a [template](#prefix-templates) when one matches;
+2. applies the winetricks verbs, on the plain prefix;
+3. sets Retina and the Windows version;
+4. installs the native `d3dcompiler_47` and the selected graphics backend;
+5. runs the exe from its own folder (or the installed program, from the prefix).
+
+Everything the launcher does is logged to `~/Library/Application Support/<Name>/launcher.log`;
+that file is the first place to look when something fails. The same folder holds small markers
+(`.winetricks-done`, `.retina-*`, `.winver-*`, `.prefix-path`...) that remember what was already
+set up. Switching an app from `--gfx opengl` to another backend restores the original files in
+its prefix.
+
+### Files and folders
+
+| Where | What |
+| --- | --- |
+| `~/Library/Application Support/Dmgexe/` | `library.json` (the library), `covers/`, `config` (folder for new prefixes) |
+| `~/Library/Application Support/<Name>/` | `launcher.log`, setup markers, and the `prefix/` unless it was put elsewhere |
+| `~/Library/Caches/dmgexe/` | downloaded runtimes, DXVK, Mesa and `d3dcompiler_47`; `prefix-templates/` (override with `DMGEXE_CACHE`) |
+| `~/.cache/winetricks/` or `~/Library/Caches/winetricks/` | what winetricks downloaded (see Storage) |
 
 ### Why `d3dcompiler_47`?
 
@@ -217,8 +401,18 @@ program** tab streams the same output).
 - **Choosing a runtime**: `gptk` is the best option for Direct3D 11/12; a recent
   `devel` runtime is better for everything else.
 - **A winetricks verb was added but nothing was installed**: verbs are installed
-  once per prefix. Use another prefix name, or delete `.winetricks-done` in
-  `~/Library/Application Support/<Name>/`, to install a changed list.
+  once per prefix. Delete the prefix in **Storage** (or use another app name) to
+  install a changed list.
+- **The first launch takes very long**: see [Slow first launch](#slow-first-launch). It is
+  almost always `dotnet40`/`dotnet48`.
+- **A DirectX 9 game shows a black screen (the cursor is visible)** with the `gptk` runtime:
+  D3DMetal only translates DirectX 11/12. Use a `staging` or `devel` runtime with
+  `--gfx dxvk`, and try Windows 7 as the Windows version.
+- **Storage will not delete or move a prefix ("in use")**: Wine processes are still alive in it
+  (a closed program often leaves `services.exe` and `winedevice.exe` behind). Stop them in
+  **Storage → Running now** (or `--stop-wine NAME`) and try again.
+- **"…drive that is not connected"**: the prefix lives on an external drive that is not mounted.
+  Connect it; nothing was lost.
 
 ## Limitations
 
@@ -236,6 +430,18 @@ program** tab streams the same output).
   `dotnet48` are not guaranteed to install on every runtime.
 - A native macOS build of a program, when it exists, will almost always perform
   better than any compatibility layer.
+- The installer mode finds the installed program by looking for new `.exe` files; it
+  does not read shortcuts, so it may need your choice, and an installer that puts its
+  files outside `C:` or only registers a service is not handled.
+- An installer that needs a reboot, or asks for something the fake Windows cannot give,
+  may fail like it would on a real PC; check the log.
+- Apps made from an installer depend on their prefix and cannot be moved to another Mac.
+- Prefix templates are only reused for the same runtime build and the same list of components,
+  and they have only been exercised with a stand-in Wine in the tests: if an app behaves oddly
+  right after being cloned, run it with `--no-template`.
+- The processes shown by **Running now** are those whose working directory or open files are in a
+  known prefix; a Wine process that has neither is listed as "(unknown)" and can only be stopped
+  one by one.
 - Apps with an embedded runtime are not signed; if macOS blocks one, run
   `xattr -cr "My Program.app"`.
 
@@ -282,9 +488,14 @@ Microsoft DLL may not be permitted.
 ## Project layout
 
 ```
-dmgexe.sh            the packager
+dmgexe.sh            the packager, the generated launcher and the storage commands
 gui/Dmgexe.swift     SwiftUI front-end
 gui/icon.svg         app icon
 gui/svg2png.swift    SVG -> PNG helper used by the build
 gui/build.sh         builds Dmgexe.app
+tests/run.sh         test runner
+tests/lib.sh         sandbox and assertions
+tests/test_*.sh      the tests, by area (cli, generate, launcher, run, install, prefix, bottles,
+                     winver, templates, storage, processes, gui)
+tests/fixtures/      the fake Wine, wineserver, winetricks and osascript
 ```

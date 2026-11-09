@@ -1,0 +1,10 @@
+#!/bin/bash
+# Fake winetricks: records the call (also in the Wine log, to check ordering) and leaves one file per verb
+echo "winetricks $*" >> "${FAKE_TRICKS_LOG:-/dev/null}"; echo "winetricks $*" >> "${FAKE_WINE_LOG:-/dev/null}"
+[[ "${FAKE_TRICKS_RC:-0}" != 0 ]] && exit "$FAKE_TRICKS_RC"
+for v in "$@"; do
+  [[ "$v" == -* ]] && continue
+  mkdir -p "$WINEPREFIX/drive_c/windows/system32"; echo "$v" > "$WINEPREFIX/drive_c/windows/system32/$v.dll"
+done
+for v in "$@"; do [[ "$v" == -* ]] || echo "$v" >> "$WINEPREFIX/winetricks.log"; done
+exit 0

@@ -1,0 +1,40 @@
+#!/bin/bash
+# Stand-in for wine64 used by the test-suite. It records what it is asked to do and simulates
+# the few effects the packager and the launcher rely on. Nothing here needs a real Wine.
+#
+# A "Windows program" in the tests is a text file; it can script this fake with these lines:
+#   install <path>   create <path> (relative to drive_c) inside the prefix, like an installer would
+#   exit <N>         exit with status N
+[[ "${1:-}" == "--version" ]] && { echo "wine-fake-${FAKE_WINE_VERSION:-1.0}"; exit 0; }
+LOG="${FAKE_WINE_LOG:-/dev/null}"
+{
+  echo "wine $*"
+  echo "  cwd=$PWD"
+  for a in "$@"; do echo "  arg=$a"; done
+  env | grep -E '^(WINEPREFIX|WINEMSYNC|WINEESYNC|WINEARCH|WINEDLLOVERRIDES|D3DM_ENABLE_METALFX|GALLIUM_DRIVER|DXVK_CONFIG|MVK_CONFIG_LOG_LEVEL|FOO)=' | sort | sed 's/^/  env /'
+} >> "$LOG"
+
+case "${1:-}" in
+  wineboot)
+    [[ -n "${FAKE_WINEBOOT_FAIL:-}" ]] && exit 1
+    d="$WINEPREFIX/drive_c"
+    mkdir -p "$d/windows/system32" "$d/windows/syswow64" \
+             "$d/Program Files/Internet Explorer" "$d/Program Files/Windows NT/Accessories"
+    : > "$d/Program Files/Internet Explorer/iexplore.exe"
+    : > "$d/Program Files/Windows NT/Accessories/wordpad.exe"
+    mkdir -p "$WINEPREFIX/dosdevices"; ln -sfn ../drive_c "$WINEPREFIX/dosdevices/c:"
+    : > "$WINEPREFIX/system.reg"
+    exit 0 ;;
+  reg) exit 0 ;;
+esac
+
+rc=0
+if [[ -f "${1:-}" ]]; then
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    case "$line" in
+      "install "*) p="$WINEPREFIX/drive_c/${line#install }"; mkdir -p "$(dirname "$p")"; echo "fake" > "$p" ;;
+      "exit "*)    rc="${line#exit }" ;;
+    esac
+  done < "$1"
+fi
+exit "$rc"

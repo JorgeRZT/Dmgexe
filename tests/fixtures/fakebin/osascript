@@ -1,0 +1,4 @@
+#!/bin/bash
+# Fake osascript: never shows a dialog or notification, just records the request.
+echo "osascript $*" >> "${FAKE_OSA_LOG:-/dev/null}"
+exit 0
