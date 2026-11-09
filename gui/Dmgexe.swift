@@ -15,6 +15,7 @@ struct SavedProgram: Codable, Identifiable, Equatable {
     var cover = "", coverH = ""   // vertical / horizontal cover image paths, empty if none
     var installer = false         // exe is a setup program to run first
     var installedExe = ""         // program found after installing, relative to the prefix ("drive_c/…")
+    var virtualDesktop = ""       // "1920x1080" to run the program in a Wine virtual desktop, "" = off
     var winver = ""               // Windows version reported to the program ("" = runtime default, else xp/7/8/10/11)
     var prefixParent = ""         // folder (e.g. on an external drive) holding <name>/prefix; empty = the default place
 
@@ -23,19 +24,19 @@ struct SavedProgram: Codable, Identifiable, Equatable {
         case id, exe, dir, name, outDir, wine, customWine, gfx
         case copyProgram = "copyGame"
         case retina, msync, esync, vsync, args, envs, winetricks, cover, coverH, detected
-        case installer, installedExe, prefixParent, winver
+        case installer, installedExe, prefixParent, winver, virtualDesktop
     }
 
     init(id: UUID = UUID(), exe: String = "", dir: String = "", name: String = "", outDir: String = "",
          wine: String = "gptk", customWine: String = "", gfx: String = "auto",
          copyProgram: Bool = true, retina: Bool = false, msync: Bool = true, esync: Bool = true, vsync: Bool = true,
          args: String = "", envs: String = "", winetricks: String = "", cover: String = "", coverH: String = "", detected: [String] = [],
-         installer: Bool = false, installedExe: String = "", prefixParent: String = "", winver: String = "") {
+         installer: Bool = false, installedExe: String = "", prefixParent: String = "", winver: String = "", virtualDesktop: String = "") {
         self.id = id; self.exe = exe; self.dir = dir; self.name = name; self.outDir = outDir
         self.wine = wine; self.customWine = customWine; self.gfx = gfx
         self.copyProgram = copyProgram; self.retina = retina; self.msync = msync; self.esync = esync; self.vsync = vsync
         self.args = args; self.envs = envs; self.winetricks = winetricks; self.cover = cover; self.coverH = coverH; self.detected = detected
-        self.installer = installer; self.installedExe = installedExe; self.prefixParent = prefixParent; self.winver = winver
+        self.installer = installer; self.installedExe = installedExe; self.prefixParent = prefixParent; self.winver = winver; self.virtualDesktop = virtualDesktop
     }
 
     // esync and vsync are missing from library files saved by earlier versions
@@ -47,7 +48,7 @@ struct SavedProgram: Codable, Identifiable, Equatable {
                   copyProgram: get(.copyProgram, true), retina: get(.retina, false), msync: get(.msync, true),
                   esync: get(.esync, true), vsync: get(.vsync, true),
                   args: get(.args, ""), envs: get(.envs, ""), winetricks: get(.winetricks, ""), cover: get(.cover, ""), coverH: get(.coverH, ""), detected: get(.detected, []),
-                  installer: get(.installer, false), installedExe: get(.installedExe, ""), prefixParent: get(.prefixParent, ""), winver: get(.winver, ""))
+                  installer: get(.installer, false), installedExe: get(.installedExe, ""), prefixParent: get(.prefixParent, ""), winver: get(.winver, ""), virtualDesktop: get(.virtualDesktop, ""))
     }
 
     func cover(_ o: CoverStyle) -> String { o == .vertical ? cover : coverH }
@@ -86,6 +87,7 @@ final class Generator: ObservableObject {
     @Published var installedExe = ""
     @Published var prefixParent = ""
     @Published var winver = WinVer.runtimeDefault
+    @Published var virtualDesktop = ""
     @Published var candidates: [String] = []   // programs an installer left, when it is not obvious which one starts it
     @Published var showCandidates = false
     @Published var showStorage = false
@@ -144,7 +146,7 @@ final class Generator: ObservableObject {
                   wine: wineChoice.key, customWine: customWine, gfx: gfx.flag,
                   copyProgram: copyProgram, retina: retina, msync: msync, esync: esync, vsync: vsync,
                   args: args, envs: envs, winetricks: winetricks, cover: cover, coverH: coverH, detected: detected.map(\.rawValue),
-                  installer: installer, installedExe: installedExe, prefixParent: prefixParent, winver: winver.key)
+                  installer: installer, installedExe: installedExe, prefixParent: prefixParent, winver: winver.key, virtualDesktop: virtualDesktop)
     }
 
     /// Adds the current form to the library, or updates the selected entry.
@@ -222,7 +224,7 @@ final class Generator: ObservableObject {
         wineChoice = .from(key: g.wine); customWine = g.customWine; gfx = .from(flag: g.gfx)
         copyProgram = g.copyProgram; retina = g.retina; msync = g.msync; esync = g.esync; vsync = g.vsync
         args = g.args; envs = g.envs; winetricks = g.winetricks; cover = g.cover; coverH = g.coverH
-        installer = g.installer; installedExe = g.installedExe; prefixParent = g.prefixParent; winver = .from(key: g.winver)
+        installer = g.installer; installedExe = g.installedExe; prefixParent = g.prefixParent; winver = .from(key: g.winver); virtualDesktop = g.virtualDesktop
         selectedID = g.id
     }
 
@@ -277,10 +279,25 @@ final class Generator: ObservableObject {
         static func from(flag: String) -> Gfx { allCases.first { $0.flag == flag } ?? .auto }
     }
 
+    /// "" (off) or WIDTHxHEIGHT
+    var virtualDesktopValid: Bool {
+        let v = virtualDesktop.trimmingCharacters(in: .whitespaces)
+        return v.isEmpty || v.range(of: #"^[0-9]{3,5}x[0-9]{3,5}$"#, options: .regularExpression) != nil
+    }
+
+    /// Options of dmgexe typed in the program's Arguments field: they would go to the program and be ignored.
+    var argsThatAreDmgexeOptions: [String] {
+        let known: Set<String> = ["--exe", "--dir", "--name", "--out", "--wine", "--icon", "--embed-wine", "--fetch-wine", "--gfx",
+                                  "--profile", "--save-profile", "--run", "--install", "--installed-exe", "--wait", "--prefix-dir",
+                                  "--winver", "--virtual-desktop", "--no-template", "--link", "--arg", "--env", "--winetricks",
+                                  "--retina", "--no-msync", "--no-esync", "--no-vsync", "--no-d3dcompiler", "--win32"]
+        return shellSplit(args).filter { known.contains($0) }
+    }
+
     private var exeInsideDir: Bool { exe.hasPrefix(dir.hasSuffix("/") ? dir : dir + "/") }
 
     var canGenerate: Bool {
-        if running { return false }
+        if running || !virtualDesktopValid { return false }
         if !installedExe.isEmpty { return true }                  // already installed: only the prefix is needed
         if installer { return !exe.isEmpty && (dir.isEmpty || exeInsideDir) }
         return !exe.isEmpty && !dir.isEmpty && exeInsideDir
@@ -407,6 +424,8 @@ final class Generator: ObservableObject {
             if !name.trimmingCharacters(in: .whitespaces).isEmpty { a += ["-n", name] }
         }
         if winver != .runtimeDefault { a += ["--winver", winver.key] }
+        let vd = virtualDesktop.trimmingCharacters(in: .whitespaces)
+        if !vd.isEmpty { a += ["--virtual-desktop", vd] }
         if !prefixParent.isEmpty { a += ["--prefix-dir", prefixParent + "/" + effectiveName + "/prefix"] }
         a += mode == .run ? ["--run"] : ["-o", outDir]
         switch wineChoice {
@@ -503,7 +522,7 @@ final class Generator: ObservableObject {
     }
 
     // splits on spaces, honouring single/double quotes
-    private func shellSplit(_ s: String) -> [String] {
+    func shellSplit(_ s: String) -> [String] {
         var out: [String] = [], cur = "", q: Character? = nil, has = false
         for c in s {
             if let qq = q { if c == qq { q = nil } else { cur.append(c) } }
@@ -610,6 +629,16 @@ struct ContentView: View {
             }
             .help("The Windows version Wine reports to the program. Some old programs only start as Windows XP/7, some new ones need 10. It does not install another Windows. Runtime default: leave Wine's own.")
             HStack {
+                Text("Virtual desktop").frame(width: 130, alignment: .trailing)
+                TextField("off (e.g. 1920x1080)", text: $g.virtualDesktop).textFieldStyle(.roundedBorder).frame(width: 170)
+                Menu("Presets") {
+                    Button("Off") { g.virtualDesktop = "" }
+                    ForEach(["1280x720", "1600x900", "1920x1080", "2560x1440"], id: \.self) { r in Button(r) { g.virtualDesktop = r } }
+                }.menuStyle(.borderlessButton).frame(width: 80)
+                if !g.virtualDesktopValid { Text("Use WIDTHxHEIGHT, e.g. 1920x1080").foregroundColor(.red).font(.caption) }
+            }
+            .help("Runs the program inside a window of this size instead of letting it take over the screen and switch the display mode. The usual cure for a black screen: try it when the program shows nothing or you lose the mouse.")
+            HStack {
                 Text("Graphics").frame(width: 130, alignment: .trailing)
                 Picker("", selection: $g.gfx) {
                     ForEach(Generator.Gfx.allCases) { Text($0.rawValue).tag($0) }
@@ -679,6 +708,13 @@ struct ContentView: View {
                         TextField("--fullscreen \"--foo bar\"", text: $g.args).textFieldStyle(.roundedBorder)
                     }
                     .help("Command-line arguments passed to the program. Quote values that contain spaces.")
+                    if !g.argsThatAreDmgexeOptions.isEmpty {
+                        HStack {
+                            Spacer().frame(width: 130)
+                            Text("\(g.argsThatAreDmgexeOptions.joined(separator: ", ")) is an option of Dmgexe, not of the program: here it is ignored. Use the matching field above (Virtual desktop, Windows version…) or Variables for environment variables.")
+                                .foregroundColor(.red).font(.caption)
+                        }
+                    }
                     HStack {
                         Text("Winetricks").frame(width: 130, alignment: .trailing)
                         TextField("vcrun2022 dotnet48", text: $g.winetricks).textFieldStyle(.roundedBorder)

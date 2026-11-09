@@ -153,6 +153,18 @@ prefix once, before anything runs (installers included), and changing it later r
 Wine's. Windows 11 needs a recent runtime (the GPTK one is old and may not know it), and a real
 32-bit XP prefix is not available because current Wine builds for Mac are 64-bit only.
 
+### Virtual desktop
+
+Some programs ask for exclusive fullscreen and switch the display mode. Under macOS that often ends in a
+black screen, a lost mouse, or a Mac cursor that disappears. **Virtual desktop** (`--virtual-desktop
+1920x1080`) runs the program inside a Wine window of that size instead (`wine explorer /desktop=…`), so
+it never takes over the screen. It applies only to the final program, not to an installer. Pick a size
+no bigger than your screen's usable area.
+
+Careful with the **Arguments** field: it is for the *program's* own command-line arguments. An option of
+Dmgexe typed there (`--env`, `--virtual-desktop`, `--winver`…) goes to the program, which ignores it; the
+form and the log warn about it. Environment variables go in **Variables** (`--env`).
+
 ### Storage
 
 The **Storage** button of the library (it turns orange and shows a count while Wine processes are
@@ -261,6 +273,7 @@ The installation is kept; choose one and run again without the installer:
 | `--gfx G` | Graphics backend: `auto` (default), `d3dmetal` (DX11/12, use with `gptk`), `dxvk` (DX9/10/11) or `opengl` (OpenGL 4.6 compatibility profile, rendered in software: slow). |
 | `--install` | `-e` is an installer. Run it in the prefix of `--name`, detect the installed program and build the app (or `--run` it) from that. Exit code 3 if the program must be chosen. |
 | `--installed-exe PATH` | Program already installed in the prefix of `--name` (`C:\...`, `Program Files/...` or `drive_c/...`). `-e` and `-d` are not needed; nothing is copied. |
+| `--virtual-desktop WxH` | Run the program in a Wine virtual desktop of that size (e.g. `1920x1080`) instead of taking over the screen. Not used for an installer. |
 | `--winver V` | Windows version Wine reports to the program: `xp`, `7`, `8`, `8.1`, `10` or `11` (default: the runtime's own). Also applied before an installer runs. |
 | `--prefix-dir DIR` | Keep the Windows prefix in `DIR` instead of `~/Library/Application Support/<Name>/prefix` (e.g. on an external volume). Repeat it with `--installed-exe` if you use it with `--install`. |
 | `--list-wine` / `--stop-wine T` | Print the Wine processes running now (with the program they belong to) / stop those of program `T`, of every program (`all`) or one (`pid:N`). |
@@ -397,6 +410,22 @@ program** tab streams the same output).
   usually a rendering feature the graphics backend does not support. Try lowering
   the program's graphics options (for example light occlusion), or another
   `--gfx` backend.
+- **Black screen from the very start** (the program runs, the mouse shows an hourglass and
+  then disappears, but nothing is drawn): the DXVK overlay is a good test.
+  Run with `--env DXVK_HUD=fps`: if the overlay shows over the black, DXVK is presenting
+  fine and the program itself is drawing black. This was seen with Anno 1404 and has not
+  been solved. Already ruled out there: the Windows version (`--winver`), `d3dx9`/`d3dx10`/
+  `vcrun2008`, native `d3dcompiler_43`/`_47`, and `--virtual-desktop`. The newest
+  DXVK (3.x) cannot be used: it needs Vulkan 1.3, and MoltenVK offers 1.1.
+- **`unimplemented function ntdll.dll.__wine_unix_call, aborting`**: the prefix was
+  created or used with a different runtime (for example `gptk` and `staging` on the
+  same prefix). Use one runtime per prefix, or delete the prefix in **Storage**.
+- **`unimplemented function winegstreamer.dll...create_video_decoder`** (the program
+  hangs on an intro video, hourglass) with `gptk`: that runtime cannot decode the
+  video. Try `--env WINEDLLOVERRIDES=winegstreamer=d`, or another runtime.
+- **`downloaded Mesa has no x64/opengl32.dll`** (old versions): some Mesa releases are
+  published without `opengl32.dll`. Dmgexe now tries older releases, and uses a complete
+  Mesa already in the cache if GitHub cannot be reached (for example, rate limit).
 - **Slow loading with a program on an external drive**: with `--link` every file
   is read from the original folder. Copy the program to the internal disk or
   generate the app without `--link`.
@@ -407,6 +436,11 @@ program** tab streams the same output).
   be removed one by one; delete the prefix in **Storage** to start clean.
 - **The first launch takes very long**: see [Slow first launch](#slow-first-launch). It is
   almost always `dotnet40`/`dotnet48`.
+- **Black screen and the Mac cursor disappears** (a program that goes fullscreen): run it in a
+  **Virtual desktop**. To see whether DXVK is presenting at all, add `DXVK_HUD=api,fps,devinfo` to
+  **Variables**: if its white text shows over the black, the program is drawing nothing; if nothing
+  shows, the window/display mode is the problem. The `api` line also says which Direct3D the program uses.
+  (A visible cursor proves little: many games use the system cursor.)
 - **A DirectX 9 game shows a black screen (the cursor is visible)** with the `gptk` runtime:
   D3DMetal only translates DirectX 11/12. Use a `staging` or `devel` runtime with
   `--gfx dxvk`, and try Windows 7 as the Windows version.
@@ -498,7 +532,7 @@ gui/svg2png.swift    SVG -> PNG helper used by the build
 gui/build.sh         builds Dmgexe.app
 tests/run.sh         test runner
 tests/lib.sh         sandbox and assertions
-tests/test_*.sh      the tests, by area (cli, generate, launcher, dxvk, run, install, prefix, bottles,
-                     winver, templates, storage, processes, gui)
+tests/test_*.sh      the tests, by area (cli, generate, launcher, dxvk, vdesk, run, install, prefix,
+                     bottles, winver, templates, storage, processes, gui)
 tests/fixtures/      the fake Wine, wineserver, winetricks and osascript
 ```
